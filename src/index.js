@@ -1,4 +1,14 @@
-import { Biscuit } from "./lib/biscuit.js";
+import { Biscuit, Scene, Sprite } from "./lib/biscuit.js";
 
-var app = new Biscuit();
+class Game extends Scene {
+    constructor() {
+        super();
 
+        this.image = new Sprite('/src/res/image.png');
+    }
+
+    update = () => {
+    }
+}
+
+var app = new Biscuit(new Game());
