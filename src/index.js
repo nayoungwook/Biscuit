@@ -5,6 +5,7 @@ class Game extends Scene {
         super();
 
         this.image = new Sprite('/src/res/image.png');
+        this.biscuit = new Sprite('/src/res/biscuit.png');
         this.timer = 0;
     }
 
@@ -17,10 +18,8 @@ class Game extends Scene {
         const r = Biscuit.renderer;
         if (!r) return;
 
-        r.drawRect(0, 0, 100, 50, '#8BC34A');
-        r.drawImage(this.image, Biscuit.width / 2, Biscuit.height / 2, 1920 / 2, 1080 / 2, { zIndex: 5, rotation: 0 });
-        r.drawCircle(0, 0, 60, '#FF5722', 40);
+        r.drawImage(this.biscuit, 0, 0, 1080 / 4, 1080 / 4, { zIndex: 5, rotation: this.timer });
     }
 }
 
-var app = new Biscuit(new Game());
+new Biscuit(new Game());
