@@ -20,6 +20,10 @@ export class Vector {
     dot(v: Vector): number { return this.x * v.x + this.y * v.y; }
     cross(v: Vector): number { return this.x * v.y - this.y * v.x; }
     rotate(rad: number): Vector { const c = Math.cos(rad), s = Math.sin(rad); return new Vector(this.x * c - this.y * s, this.x * s + this.y * c); }
+
+    dist(v: Vector): number {
+        return Math.sqrt((v.x - this.x) * (v.x - this.x) + (v.y - this.y) * (v.y - this.y));
+    }
 }
 
 export class Sprite {
@@ -169,10 +173,6 @@ export class Camera {
 
 }
 
-export function getDistance(v1: Vector, v2: Vector): number {
-    return Math.sqrt((v1.x - v2.x) * (v1.x - v2.x) + (v1.y - v2.y) * (v1.y - v2.y));
-}
-
 type TextOptions = {
     font?: string;       // CSS font, 예: "48px 'Nanum Gothic'"
     align?: "left" | "center" | "right";
@@ -298,7 +298,11 @@ class Renderer {
         const pivotY = (cmd.h ?? 0) / 2;
 
         mat4.translate(model, model, [cmd.x - cmd.w / 2 + pivotX, cmd.y - cmd.h / 2 + pivotY, 0]);
-        mat4.rotateZ(model, model, cmd.rotation ?? 0);
+
+        let rot = cmd.rotation ?? 0;
+        rot *= -1;
+        mat4.rotateZ(model, model, rot);
+
         mat4.translate(model, model, [-pivotX, -pivotY, 0]);
         mat4.scale(model, model, [cmd.w ?? 1, cmd.h ?? 1, 1]);
 
@@ -328,7 +332,11 @@ class Renderer {
         const pivotY = (cmd.h ?? 0) / 2;
 
         mat4.translate(model, model, [cmd.x - cmd.w / 2 + pivotX, cmd.y - cmd.h / 2 + pivotY, 0]);
-        mat4.rotateZ(model, model, cmd.rotation ?? 0);
+
+        let rot = cmd.rotation ?? 0;
+        rot *= -1;
+        mat4.rotateZ(model, model, rot);
+
         mat4.translate(model, model, [-pivotX, -pivotY, 0]);
         mat4.scale(model, model, [cmd.w ?? 1, cmd.h ?? 1, 1]);
 
@@ -434,7 +442,11 @@ class Renderer {
         const pivotY = (cmd.h ?? 0) / 2;
 
         mat4.translate(model, model, [cmd.x - cmd.w / 2 + pivotX, cmd.y - cmd.h / 2 + pivotY, 0]);
-        mat4.rotateZ(model, model, cmd.rotation ?? 0);
+
+        let rot = cmd.rotation ?? 0;
+        rot *= -1;
+        mat4.rotateZ(model, model, rot);
+
         mat4.translate(model, model, [-pivotX, -pivotY, 0]);
         mat4.scale(model, model, [cmd.w ?? 1, cmd.h ?? 1, 1]);
 
@@ -473,22 +485,137 @@ class Renderer {
     }
 }
 
+export class Sound {
+    private src: string;
+    private pool: HTMLAudioElement[] = [];
+    private poolSize: number;
+    private index: number = 0;
+
+    constructor(src: string, poolSize: number = 8) {
+        this.src = src;
+        this.poolSize = poolSize;
+
+        for (let i = 0; i < poolSize; i++) {
+            const audio = new Audio(src);
+            audio.preload = "auto";
+            this.pool.push(audio);
+        }
+    }
+
+    play(loop: boolean = false, volume: number = 1.0) {
+        const audio = this.pool[this.index];
+        this.index = (this.index + 1) % this.poolSize;
+
+        audio.loop = loop;
+        audio.volume = Math.min(1, Math.max(0, volume));
+        audio.currentTime = 0;
+        audio.play().catch(err => {
+            console.warn("Audio play failed:", err);
+        });
+    }
+
+    stopAll() {
+        for (const audio of this.pool) {
+            audio.pause();
+            audio.currentTime = 0;
+        }
+    }
+
+    setVolume(volume: number) {
+        for (const audio of this.pool) {
+            audio.volume = Math.min(1, Math.max(0, volume));
+        }
+    }
+}
+
+export class GameObject {
+    public position: Vector = new Vector(0, 0, 0);
+    public width: number = 100;
+    public height: number = 100;
+    public rotation: number = 0;
+    public zIndex: number = 1;
+
+    public sprite: Sprite | null = null;
+
+    public GameObject(position: Vector = new Vector(0, 0), width: number = 100, height: number = 1000) { this.position = position; this.width = width; this.height = height; };
+
+    public update = (): void => { };
+    public render = (): void => {
+        Biscuit.renderer.drawImage(this.sprite, this.position.x, this.position.y, this.width, this.height, { zIndex: this.zIndex, rotation: this.rotation })
+    };
+}
+
 export class Biscuit {
     private glContext?: WebGLRenderingContext;
     private canvas?: HTMLCanvasElement;
     private currentScene: Scene | null = null;
-    private static renderer?: Renderer;
+    public static renderer?: Renderer;
 
     public static width: number = 0;
     public static height: number = 0;
 
+    // --- 입력 관리용 static 멤버 ---
+    static keys: Set<string> = new Set(); // 키보드 입력
+    static mouse = { x: 0, y: 0, buttons: new Set<number>() }; // 마우스 입력
+    static touches: Map<number, { x: number; y: number }> = new Map(); // 터치 입력
+
     constructor(scene: Scene | null) {
         this.currentScene = scene;
-        this.initialize_engine();
+        this.initializeEngine();
+        this.initializeInput();
         if (!scene) Biscuit.printWarning("Failed to find scene, This may cause problem.");
     }
 
-    initialize_engine = () => {
+    // --- 입력 초기화 ---
+    initializeInput = () => {
+        // Keyboard
+        window.addEventListener("keydown", (e) => {
+            Biscuit.keys.add(e.key);
+        });
+        window.addEventListener("keyup", (e) => {
+            Biscuit.keys.delete(e.key);
+        });
+
+        // Mouse
+        window.addEventListener("mousemove", (e) => {
+            Biscuit.mouse.x = e.clientX;
+            Biscuit.mouse.y = e.clientY;
+        });
+        window.addEventListener("mousedown", (e) => {
+            Biscuit.mouse.buttons.add(e.button);
+        });
+        window.addEventListener("mouseup", (e) => {
+            Biscuit.mouse.buttons.delete(e.button);
+        });
+
+        // Touch
+        window.addEventListener("touchstart", (e) => {
+            for (const t of Array.from(e.changedTouches)) {
+                Biscuit.touches.set(t.identifier, { x: t.clientX - Biscuit.width / 2, y: -(t.clientY - Biscuit.height / 2) });
+            }
+        });
+
+        window.addEventListener("touchmove", (e) => {
+
+            e.preventDefault(); // 기본 스크롤/새로고침 방지
+            for (const t of Array.from(e.changedTouches)) {
+                Biscuit.touches.set(t.identifier, { x: t.clientX - Biscuit.width / 2, y: -(t.clientY - Biscuit.height / 2) });
+            }
+        }, { passive: false });
+        window.addEventListener("touchend", (e) => {
+            for (const t of Array.from(e.changedTouches)) {
+                Biscuit.touches.delete(t.identifier);
+            }
+        });
+        window.addEventListener("touchcancel", (e) => {
+            for (const t of Array.from(e.changedTouches)) {
+                Biscuit.touches.delete(t.identifier);
+            }
+        });
+    };
+
+    // --- 나머지는 기존 코드 그대로 ---
+    initializeEngine = () => {
         this.createCanvasElement();
         this.createGL();
         if (this.glContext) Biscuit.renderer = new Renderer(this, this.glContext);
@@ -506,7 +633,7 @@ export class Biscuit {
             requestAnimationFrame(loop);
         };
         requestAnimationFrame(loop);
-    }
+    };
 
     resizeCanvas = () => {
         const width = document.body.clientWidth, height = document.body.clientHeight;
@@ -517,23 +644,25 @@ export class Biscuit {
         }
         Biscuit.width = this.canvas.width;
         Biscuit.height = this.canvas.height;
-    }
+    };
 
     createCanvasElement = () => {
         const c = document.createElement("canvas");
         document.body.style.margin = "0";
         document.body.appendChild(c);
         this.canvas = c;
-    }
+    };
 
     createGL = () => {
         if (!this.canvas) return;
         const gl = this.canvas.getContext("webgl", { antialias: true, alpha: true });
         if (!gl) throw new Error("Failed to initialize WebGL");
         this.glContext = gl;
-    }
+    };
 
-    public getCanvasSize() { return { width: this.canvas?.width ?? 0, height: this.canvas?.height ?? 0 }; }
+    public getCanvasSize() {
+        return { width: this.canvas?.width ?? 0, height: this.canvas?.height ?? 0 };
+    }
 
     static drawImage(...args: Parameters<Renderer["drawImage"]>) { this.renderer?.drawImage(...args); }
     static drawRect(...args: Parameters<Renderer["drawRect"]>) { this.renderer?.drawRect(...args); }

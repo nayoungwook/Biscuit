@@ -18,6 +18,9 @@ export class Vector {
     dot(v) { return this.x * v.x + this.y * v.y; }
     cross(v) { return this.x * v.y - this.y * v.x; }
     rotate(rad) { const c = Math.cos(rad), s = Math.sin(rad); return new Vector(this.x * c - this.y * s, this.x * s + this.y * c); }
+    dist(v) {
+        return Math.sqrt((v.x - this.x) * (v.x - this.x) + (v.y - this.y) * (v.y - this.y));
+    }
 }
 export class Sprite {
     constructor(path) {
@@ -126,9 +129,6 @@ export class Camera {
 Camera.position = new Vector(0, 0, 1);
 Camera.view = mat4.create();
 Camera.projection = mat4.create();
-export function getDistance(v1, v2) {
-    return Math.sqrt((v1.x - v2.x) * (v1.x - v2.x) + (v1.y - v2.y) * (v1.y - v2.y));
-}
 class Renderer {
     constructor(biscuit, gl) {
         this.biscuit = null;
@@ -235,7 +235,9 @@ class Renderer {
         const pivotX = ((_a = cmd.w) !== null && _a !== void 0 ? _a : 0) / 2;
         const pivotY = ((_b = cmd.h) !== null && _b !== void 0 ? _b : 0) / 2;
         mat4.translate(model, model, [cmd.x - cmd.w / 2 + pivotX, cmd.y - cmd.h / 2 + pivotY, 0]);
-        mat4.rotateZ(model, model, (_c = cmd.rotation) !== null && _c !== void 0 ? _c : 0);
+        let rot = (_c = cmd.rotation) !== null && _c !== void 0 ? _c : 0;
+        rot *= -1;
+        mat4.rotateZ(model, model, rot);
         mat4.translate(model, model, [-pivotX, -pivotY, 0]);
         mat4.scale(model, model, [(_d = cmd.w) !== null && _d !== void 0 ? _d : 1, (_e = cmd.h) !== null && _e !== void 0 ? _e : 1, 1]);
         this.texturedShader.setUniformMatrix4fv("u_model", model);
@@ -259,7 +261,9 @@ class Renderer {
         const pivotX = ((_a = cmd.w) !== null && _a !== void 0 ? _a : 0) / 2;
         const pivotY = ((_b = cmd.h) !== null && _b !== void 0 ? _b : 0) / 2;
         mat4.translate(model, model, [cmd.x - cmd.w / 2 + pivotX, cmd.y - cmd.h / 2 + pivotY, 0]);
-        mat4.rotateZ(model, model, (_c = cmd.rotation) !== null && _c !== void 0 ? _c : 0);
+        let rot = (_c = cmd.rotation) !== null && _c !== void 0 ? _c : 0;
+        rot *= -1;
+        mat4.rotateZ(model, model, rot);
         mat4.translate(model, model, [-pivotX, -pivotY, 0]);
         mat4.scale(model, model, [(_d = cmd.w) !== null && _d !== void 0 ? _d : 1, (_e = cmd.h) !== null && _e !== void 0 ? _e : 1, 1]);
         this.colorShader.setUniformMatrix4fv("u_model", model);
@@ -340,7 +344,9 @@ class Renderer {
         const pivotX = ((_d = cmd.w) !== null && _d !== void 0 ? _d : 0) / 2;
         const pivotY = ((_e = cmd.h) !== null && _e !== void 0 ? _e : 0) / 2;
         mat4.translate(model, model, [cmd.x - cmd.w / 2 + pivotX, cmd.y - cmd.h / 2 + pivotY, 0]);
-        mat4.rotateZ(model, model, (_f = cmd.rotation) !== null && _f !== void 0 ? _f : 0);
+        let rot = (_f = cmd.rotation) !== null && _f !== void 0 ? _f : 0;
+        rot *= -1;
+        mat4.rotateZ(model, model, rot);
         mat4.translate(model, model, [-pivotX, -pivotY, 0]);
         mat4.scale(model, model, [(_g = cmd.w) !== null && _g !== void 0 ? _g : 1, (_h = cmd.h) !== null && _h !== void 0 ? _h : 1, 1]);
         this.texturedShader.setUniformMatrix4fv("u_model", model);
@@ -368,10 +374,104 @@ class Renderer {
         return tex;
     }
 }
+export class Sound {
+    constructor(src, poolSize = 8) {
+        this.pool = [];
+        this.index = 0;
+        this.src = src;
+        this.poolSize = poolSize;
+        for (let i = 0; i < poolSize; i++) {
+            const audio = new Audio(src);
+            audio.preload = "auto";
+            this.pool.push(audio);
+        }
+    }
+    play(loop = false, volume = 1.0) {
+        const audio = this.pool[this.index];
+        this.index = (this.index + 1) % this.poolSize;
+        audio.loop = loop;
+        audio.volume = Math.min(1, Math.max(0, volume));
+        audio.currentTime = 0;
+        audio.play().catch(err => {
+            console.warn("Audio play failed:", err);
+        });
+    }
+    stopAll() {
+        for (const audio of this.pool) {
+            audio.pause();
+            audio.currentTime = 0;
+        }
+    }
+    setVolume(volume) {
+        for (const audio of this.pool) {
+            audio.volume = Math.min(1, Math.max(0, volume));
+        }
+    }
+}
+export class GameObject {
+    constructor() {
+        this.position = new Vector(0, 0, 0);
+        this.width = 100;
+        this.height = 100;
+        this.rotation = 0;
+        this.zIndex = 1;
+        this.sprite = null;
+        this.update = () => { };
+        this.render = () => {
+            Biscuit.renderer.drawImage(this.sprite, this.position.x, this.position.y, this.width, this.height, { zIndex: this.zIndex, rotation: this.rotation });
+        };
+    }
+    GameObject(position = new Vector(0, 0), width = 100, height = 1000) { this.position = position; this.width = width; this.height = height; }
+    ;
+}
 export class Biscuit {
     constructor(scene) {
         this.currentScene = null;
-        this.initialize_engine = () => {
+        // --- 입력 초기화 ---
+        this.initializeInput = () => {
+            // Keyboard
+            window.addEventListener("keydown", (e) => {
+                Biscuit.keys.add(e.key);
+            });
+            window.addEventListener("keyup", (e) => {
+                Biscuit.keys.delete(e.key);
+            });
+            // Mouse
+            window.addEventListener("mousemove", (e) => {
+                Biscuit.mouse.x = e.clientX;
+                Biscuit.mouse.y = e.clientY;
+            });
+            window.addEventListener("mousedown", (e) => {
+                Biscuit.mouse.buttons.add(e.button);
+            });
+            window.addEventListener("mouseup", (e) => {
+                Biscuit.mouse.buttons.delete(e.button);
+            });
+            // Touch
+            window.addEventListener("touchstart", (e) => {
+                for (const t of Array.from(e.changedTouches)) {
+                    Biscuit.touches.set(t.identifier, { x: t.clientX - Biscuit.width / 2, y: -(t.clientY - Biscuit.height / 2) });
+                }
+            });
+            window.addEventListener("touchmove", (e) => {
+                e.preventDefault(); // 기본 스크롤/새로고침 방지
+                for (const t of Array.from(e.changedTouches)) {
+                    Biscuit.touches.set(t.identifier, { x: t.clientX - Biscuit.width / 2, y: -(t.clientY - Biscuit.height / 2) });
+                }
+            }, { passive: false });
+            window.addEventListener("touchend", (e) => {
+                for (const t of Array.from(e.changedTouches)) {
+                    Biscuit.touches.delete(t.identifier);
+                }
+            });
+            window.addEventListener("touchcancel", (e) => {
+                for (const t of Array.from(e.changedTouches)) {
+                    Biscuit.touches.delete(t.identifier);
+                }
+            });
+        };
+        // --- 나머지는 기존 코드 그대로 ---
+        this.initializeEngine = () => {
             this.createCanvasElement();
             this.createGL();
             if (this.glContext)
@@ -417,11 +517,15 @@ export class Biscuit {
             this.glContext = gl;
         };
         this.currentScene = scene;
-        this.initialize_engine();
+        this.initializeEngine();
+        this.initializeInput();
         if (!scene)
             Biscuit.printWarning("Failed to find scene, This may cause problem.");
     }
-    getCanvasSize() { var _a, _b, _c, _d; return { width: (_b = (_a = this.canvas) === null || _a === void 0 ? void 0 : _a.width) !== null && _b !== void 0 ? _b : 0, height: (_d = (_c = this.canvas) === null || _c === void 0 ? void 0 : _c.height) !== null && _d !== void 0 ? _d : 0 }; }
+    getCanvasSize() {
+        var _a, _b, _c, _d;
+        return { width: (_b = (_a = this.canvas) === null || _a === void 0 ? void 0 : _a.width) !== null && _b !== void 0 ? _b : 0, height: (_d = (_c = this.canvas) === null || _c === void 0 ? void 0 : _c.height) !== null && _d !== void 0 ? _d : 0 };
+    }
     static drawImage(...args) { var _a; (_a = this.renderer) === null || _a === void 0 ? void 0 : _a.drawImage(...args); }
     static drawRect(...args) { var _a; (_a = this.renderer) === null || _a === void 0 ? void 0 : _a.drawRect(...args); }
     static drawCircle(...args) { var _a; (_a = this.renderer) === null || _a === void 0 ? void 0 : _a.drawCircle(...args); }
@@ -430,3 +534,7 @@ export class Biscuit {
 }
 Biscuit.width = 0;
 Biscuit.height = 0;
+// --- 입력 관리용 static 멤버 ---
+Biscuit.keys = new Set(); // 키보드 입력
+Biscuit.mouse = { x: 0, y: 0, buttons: new Set() }; // 마우스 입력
+Biscuit.touches = new Map(); // 터치 입력
