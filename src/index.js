@@ -67,13 +67,43 @@ class Cookie extends GameObject {
             this.xv = this.position.x - this.backupX;
             this.yv = this.position.y - this.backupY;
         } else {
-            this.touchStarted = false;
+            if (!Biscuit.mouse.buttons) {
+                this.touchStarted = false;
 
-            this.position.x += this.xv;
-            this.position.y += this.yv;
+                this.position.x += this.xv;
+                this.position.y += this.yv;
 
-            this.xv += (0 - this.xv) / 20;
-            this.yv += (0 - this.yv) / 20;
+                this.xv += (0 - this.xv) / 20;
+                this.yv += (0 - this.yv) / 20;
+            }
+        }
+
+        if (Biscuit.mouse.buttons.size) {
+            let touchVector = new Vector(Biscuit.mouse.x, Biscuit.mouse.y);
+
+            if (touchVector.dist(this.position) <= this.width / 2) {
+                if (!this.touchStarted) {
+                    this.touchOffset = touchVector.sub(this.position);
+                    this.touchStarted = true;
+                }
+            }
+
+            if (this.touchStarted) {
+                this.position = touchVector.sub(this.touchOffset);
+            }
+
+            this.xv = this.position.x - this.backupX;
+            this.yv = this.position.y - this.backupY;
+        } else {
+            if (!touch) {
+                this.touchStarted = false;
+
+                this.position.x += this.xv;
+                this.position.y += this.yv;
+
+                this.xv += (0 - this.xv) / 20;
+                this.yv += (0 - this.yv) / 20;
+            }
         }
 
         this.rotation += ((this.xv) + (this.yv)) / 50;

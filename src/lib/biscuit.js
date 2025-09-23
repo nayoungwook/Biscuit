@@ -438,8 +438,8 @@ export class Biscuit {
             });
             // Mouse
             window.addEventListener("mousemove", (e) => {
-                Biscuit.mouse.x = e.clientX;
-                Biscuit.mouse.y = e.clientY;
+                Biscuit.mouse.x = e.clientX - Biscuit.width / 2;
+                Biscuit.mouse.y = -(e.clientY - Biscuit.height / 2);
             });
             window.addEventListener("mousedown", (e) => {
                 Biscuit.mouse.buttons.add(e.button);
