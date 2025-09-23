@@ -89,8 +89,8 @@ class Game extends Scene {
             new Sound('res/cookie2.mp3'),
             new Sound('res/cookie3.mp3'),
         ];
-        this.image = new Sprite('/src/res/image.png');
-        this.biscuit = new Sprite('/src/res/biscuit.png');
+        this.image = new Sprite('res/image.png');
+        this.biscuit = new Sprite('res/biscuit.png');
         this.cookie = new Cookie(this);
         this.timer = 0;
     }
