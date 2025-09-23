@@ -15,10 +15,7 @@ class Game extends Scene {
     }
 
     render = () => {
-        const r = Biscuit.renderer;
-        if (!r) return;
-
-        r.drawImage(this.biscuit, 0, 0, 1080 / 4, 1080 / 4, { zIndex: 5, rotation: this.timer });
+        Biscuit.renderer.drawImage(this.biscuit, 0, 0, 1080 / 4, 1080 / 4, { zIndex: 5, rotation: this.timer });
     }
 }
 
