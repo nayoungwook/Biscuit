@@ -126,7 +126,7 @@ export class Shader {
 
 /* Renderer with zIndex batching */
 type DrawCommand = {
-    type: "image" | "rect" | "circle";
+    type: "image" | "rect" | "circle" | "text";
     zIndex: number;
     alpha?: number;
     sprite?: Sprite;
@@ -134,6 +134,9 @@ type DrawCommand = {
     rotation?: number;
     color?: [number, number, number, number];
     radius?: number; segments?: number;
+
+    textOptions?: TextOptions;
+    text?: string;
 };
 
 export class Camera {
@@ -170,6 +173,12 @@ export function getDistance(v1: Vector, v2: Vector): number {
     return Math.sqrt((v1.x - v2.x) * (v1.x - v2.x) + (v1.y - v2.y) * (v1.y - v2.y));
 }
 
+type TextOptions = {
+    font?: string;       // CSS font, 예: "48px 'Nanum Gothic'"
+    align?: "left" | "center" | "right";
+    maxWidth?: number;   // optional
+};
+
 class Renderer {
     private gl: WebGLRenderingContext;
     private biscuit: Biscuit | null = null;
@@ -178,12 +187,23 @@ class Renderer {
     private quadVBO: WebGLBuffer | null = null;
     private quadUVBO: WebGLBuffer | null = null;
 
+    private textCanvas: HTMLCanvasElement | null = null;
+    private textCtx: CanvasRenderingContext2D | null = null;
+    private textTextureMap = new Map<string, WebGLTexture>();
+
     private drawCalls: DrawCommand[] = [];
 
     constructor(biscuit: Biscuit, gl: WebGLRenderingContext) {
         this.biscuit = biscuit;
         this.gl = gl;
         this.initialize();
+
+
+        // canvas for text rendering
+        this.textCanvas = document.createElement("canvas");
+        this.textCanvas.width = 1024;
+        this.textCanvas.height = 256;
+        this.textCtx = this.textCanvas.getContext("2d")!;
     }
 
     private async initialize() {
@@ -236,6 +256,10 @@ class Renderer {
         this.drawCalls.push({ type: "circle", x: cx, y: cy, radius, color: this.parseColor(color), segments, zIndex });
     }
 
+    public drawText(text: string, cx: number, cy: number, color: string | [number, number, number, number], textOptions = {}, zIndex = 0) {
+        this.drawCalls.push({ type: "text", text: text, x: cx, y: cy, color: this.parseColor(color), zIndex, textOptions: textOptions });
+    }
+
     // --- Flush draw calls ---
     public flush() {
         this.drawCalls.sort((a, b) => a.zIndex - b.zIndex);
@@ -243,6 +267,7 @@ class Renderer {
             if (cmd.type === "image" && cmd.sprite && cmd.w && cmd.h) this.executeDrawImage(cmd);
             else if (cmd.type === "rect" && cmd.w && cmd.h && cmd.color) this.executeDrawRect(cmd);
             else if (cmd.type === "circle" && cmd.radius && cmd.color) this.executeDrawCircle(cmd);
+            else if (cmd.type === "text" && cmd.color) this.executeDrawText(cmd);
         }
         this.drawCalls = [];
     }
@@ -347,6 +372,80 @@ class Renderer {
 
         this.gl.drawArrays(this.gl.TRIANGLE_FAN, 0, verts.length / 2);
         this.gl.deleteBuffer(buffer);
+    }
+
+    private executeDrawText(cmd: DrawCommand) {
+        if (!this.texturedShader || !this.quadVBO || !this.quadUVBO) return;
+
+        let options: TextOptions = cmd.textOptions;
+        const font = options?.font ?? "48px 'Arial'";
+        const color = cmd.color;
+        const align = options?.align ?? "center";
+        const maxWidth = options?.maxWidth ?? this.textCanvas.width;
+
+        const text = cmd.text;
+
+        const ctx = this.textCtx;
+        ctx.fillStyle = `rgba(${Math.floor(color[0] * 255)},${Math.floor(color[1] * 255)},${Math.floor(color[2] * 255)},${color[3]})`;
+        ctx.font = font;
+        ctx.textAlign = align;
+        ctx.textBaseline = "middle";
+        ctx.fillText(cmd.text, this.textCanvas.width / 2, this.textCanvas.height / 2, maxWidth);
+
+        let tex = this.textTextureMap.get(text);
+        if (!tex) {
+            tex = this.gl.createTexture()!;
+            this.textTextureMap.set(text, tex);
+        }
+
+        this.gl.activeTexture(this.gl.TEXTURE0);
+        this.gl.bindTexture(this.gl.TEXTURE_2D, tex);
+        this.gl.texImage2D(
+            this.gl.TEXTURE_2D, 0, this.gl.RGBA,
+            this.gl.RGBA, this.gl.UNSIGNED_BYTE, this.textCanvas
+        );
+
+        this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, true);
+        this.gl.pixelStorei(this.gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 1);
+        this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, this.gl.RGBA, this.gl.UNSIGNED_BYTE, this.textCanvas);
+        this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR);
+        this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.LINEAR);
+        this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
+        this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
+
+        this.texturedShader.use();
+
+        const aPos = this.texturedShader.getAttribLocation("a_position");
+        this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.quadVBO);
+        this.gl.enableVertexAttribArray(aPos);
+        this.gl.vertexAttribPointer(aPos, 2, this.gl.FLOAT, false, 0, 0);
+
+        const aUv = this.texturedShader.getAttribLocation("a_uv");
+        this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.quadUVBO);
+        this.gl.enableVertexAttribArray(aUv);
+        this.gl.vertexAttribPointer(aUv, 2, this.gl.FLOAT, false, 0, 0);
+
+        const model = mat4.create();
+
+        cmd.w = this.textCanvas.width / 2;
+        cmd.h = this.textCanvas.height / 2;
+
+        const pivotX = (cmd.w ?? 0) / 2;
+        const pivotY = (cmd.h ?? 0) / 2;
+
+        mat4.translate(model, model, [cmd.x - cmd.w / 2 + pivotX, cmd.y - cmd.h / 2 + pivotY, 0]);
+        mat4.rotateZ(model, model, cmd.rotation ?? 0);
+        mat4.translate(model, model, [-pivotX, -pivotY, 0]);
+        mat4.scale(model, model, [cmd.w ?? 1, cmd.h ?? 1, 1]);
+
+        this.texturedShader.setUniformMatrix4fv("u_model", model);
+
+        this.texturedShader.setUniformMatrix4fv("u_view", Camera.view);
+        this.texturedShader.setUniformMatrix4fv("u_projection", Camera.projection);
+
+        this.texturedShader.setUniform1i("u_texture", 0);
+
+        this.gl.drawArrays(this.gl.TRIANGLES, 0, 6);
     }
 
     private imageTextureMap = new WeakMap<HTMLImageElement, WebGLTexture>();
